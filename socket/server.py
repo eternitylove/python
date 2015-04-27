@@ -14,9 +14,7 @@ if __name__ == '__main__':
 
 		while True:
 			buf = connection.recv(1024)
-
-			if not buf:
-				break
+			if not buf:break
 			connection.send("echo=>"+buf)
 		connection.close()
 
