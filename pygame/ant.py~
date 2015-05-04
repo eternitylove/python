@@ -227,7 +227,7 @@ class AntStateHunting(State):
 		if spider is None:
 			return 
 		self.ant.destination = spider.location
-		if self.ant.location.get_distance_to(spider.location)<50:
+		if self.ant.location.get_distance_to(spider.location)<15:
 		 	if (randint(1,5)==1):
 				spider.bitten()
 				if spider.health<=0:
@@ -244,7 +244,7 @@ class AntStateHunting(State):
 		 	return "exploring"
 		return None
 	def entry_actions(self):
-		self.speed = 160 + randint(0,50)
+		self.speed = 200 + randint(0,50)
 	def exit_actions(self):
 		self.got_kill = False
 
