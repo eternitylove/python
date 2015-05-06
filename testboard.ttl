@@ -1,0 +1,733 @@
+;=======================================================================================
+;|   p1010rdb-pb test script
+;| author   : huang yuangang
+;| date     : 2015-1-10
+;| teraterm version 4.71
+;=========================================================================================
+
+tempstr1=""
+tempstr2=""
+tempstr3=""
+macstr1=""
+macstr2=""
+macstr3=""
+macstrtemp=""
+board_num=""
+hostip="10.192.244.3"
+boardip="10.192.244.240"
+
+yesnobox "开始设备测试？"  "test"
+if result=0 goto endtest
+
+call testi2c
+call testpcie
+call testusb
+call testphy
+;========================
+call writespiboot
+call checkspiboot
+;========================
+call testemmc
+call checkemmcboot
+;========================
+call writenandboot
+call checknandboot
+;========================
+call writefirmware
+call setrealmac
+messagebox '测试完成，一切正常，请继续进行下面的测试' 'result'
+
+end
+
+
+:testi2c
+flushrecv   
+timeout=5
+sendln ' '
+wait '=>'
+statusbox "测试I2C 设备中...   " "status"
+sendln 'i2c dev 0'
+wait '=>'
+sendln 'i2c probe'
+wait 'Valid chip addresses: 08 50 68'
+wait '=>'
+sendln 'mw.b 1000000 aa 100'
+wait '=>'
+sendln 'i2c write 1000000 50 0.2 100'
+wait '=>'
+sendln ' '
+wait '=>'
+sendln 'i2c read 50 0.2 100 2000000'
+wait '=>'
+sendln 'cmp.b 1000000 2000000 100'
+wait 'Total of 256 byte(s) were the same'
+if result!=1 then
+	closesbox
+	messagebox "I2C EEPROM TEST FAILED!" "result"
+	timeout=0
+	goto endtest
+endif
+sendln 'i2c mw 68 0.1 30 1'
+wait '=>'
+pause 5
+sendln 'i2c md 68 0.1'
+wait '0000: 35'
+if result!=1 then
+	closesbox
+	messagebox "I2C RTC TEST FAILED!" "result"
+	timeout=0
+	goto endtest
+endif
+closesbox
+timeout=0
+return 
+end
+
+
+
+:testpcie
+flushrecv   
+timeout=5
+sendln ' '
+wait '=>'
+statusbox "测试PCIE...   " "status"
+sendln 'pci 0'
+wait '00.00.00'
+sendln 'pci 1'
+wait '01.00.00'
+sendln 'pci 2'
+wait '02.00.00'
+sendln 'pci 3'
+wait '03.00.00'
+if result!=1 then
+	closesbox
+	messagebox "PCIE TEST FAILED!" "result"	
+	timeout=0
+	goto endtest
+endif
+closesbox
+timeout=0
+return 
+end
+
+
+:testusb
+flushrecv
+sendln ' '
+wait '=>'
+statusbox "测试USB接口。。。" "status"
+timeout=10
+sendln 'mw.b 1000000 ee 1000'
+wait '=>'
+sendln 'usb start'
+wait '=>'
+pause 3
+sendln ' '
+wait '=>'
+sendln 'usb write 1000000 1 1000'
+wait '=>'
+sendln ' '
+wait '=>'
+sendln 'usb read 2000000 1 1000'
+wait '=>'
+sendln ' '
+wait '=>'
+sendln 'cmp 1000000 2000000 1000'
+wait 'Total of 4096 word(s) were the same'
+if result!=1 then
+	closesbox
+	messagebox "USB test FAILED!" "result"
+	timeout=0
+	goto endtest
+endif
+closesbox
+timeout=0
+return
+
+:testphy
+flushrecv
+statusbox "测试NET PHY。。。" "status"
+timeout=3
+sendln 'mdio list'
+wait '1 - RealTek RTL8211FS'
+if result=0 goto phy4fail
+wait '3 - RealTek RTL8211FS'
+if result=0 goto phy3fail
+wait '2 - Aquantia AQR105'
+if result=0 goto phy2fail
+sendln 
+wait '=>'
+closesbox
+timeout=0
+return 
+
+:phy4fail
+closesbox
+messagebox "J4 phy TEST FAILED!" "result"
+timeout=0
+goto endtest
+
+:phy3fail
+closesbox
+messagebox "J5 PHY TEST FAILED!" "result"
+timeout=0
+goto endtest
+
+:phy2fail
+closesbox
+messagebox "J3 PHY TEST FAILED!" "result"
+timeout=0
+goto endtest
+end
+
+;========================================================================
+
+:writespiboot
+timeout=50
+flushrecv
+sendln ' '
+wait '=>'
+call checknet
+
+statusbox "烧写SPI uboot中....     "   "status"
+sendln 'tftp 1000000 u-boot-t1023rdb-spiboot.bin'
+wait 'done'
+wait '=>'
+sendln 'sf probe'
+wait 'SF: Detected S25FL512S_256K'
+if result!=1 then
+	closesbox
+	messagebox "SPI TEST FAILED!" "result"
+	timeout=0
+	goto endtest
+endif
+sendln ' '
+wait '=>'
+sendln 'sf erase 0 200000'
+wait 'Erased: OK'
+sendln ' '
+wait '=>'
+sendln 'sf write 1000000 0 $filesize'
+wait 'Written: OK'
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 fsl_fman_ucode_t1024_r1.0_108_4_2.bin'
+wait 'done'
+if result=0 goto outtime
+sendln ' '
+wait '=>'
+sendln 'sf write 1000000 110000 $filesize'
+wait 'Written: OK'
+if result=0 goto outtime
+sendln ' '
+wait '=>'
+closesbox
+timeout=0
+return 
+
+:checkspiboot
+flushrecv
+timeout=60
+messagebox '断电设置SW2.7 OFF/ SW3.1 OFF / SW4.3 ON.在60秒内重新上电' 'set'
+wait 'boot from SPI'
+if result=0 goto spibootfail
+pause 2
+sendln ' '
+wait '=>'
+timeout=0
+return
+end
+
+:spibootfail
+closesbox
+beep 0
+messagebox "spi启动失败。" "check spi boot"
+sendln $3
+goto endtest
+end
+;==================================================================================================
+:testemmc
+flushrecv   
+
+sendln ' '
+wait '=>'
+call checknet2
+timeout=20
+statusbox "测试emmc 设备中...   " "status"
+sendln ' '
+wait '=>'
+sendln 'mmc info'
+wait 'Capacity: 7.3 GiB'
+if result=0 goto emmcfail
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 u-boot-t1023rdb-sdboot.bin '
+wait '=>'
+sendln ' '
+wait '=>'
+sendln 'mmc write 1000000 8 0x800'
+wait '=>'
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 fsl_fman_ucode_t1024_r1.0_108_4_2.bin'
+wait '=>'
+sendln ' '
+wait '=>'
+sendln 'mmc write 1000000 0x820 80'
+wait '=>'
+closesbox
+timeout=0
+return
+
+:emmcfail
+closesbox
+beep 0
+messagebox "未发现emmc，请确认SW4.3为ON" "check spi boot"
+sendln $3
+goto endtest
+end
+
+:checkemmcboot
+flushrecv
+timeout=60
+messagebox '断电后设置SW2.7 ON / SW3.1 ON.并在60秒内重新上电' 'set'
+wait 'boot from SD/MMC'
+if result=0 goto emmcbootfail
+pause 3
+sendln ' '
+wait '=>'
+timeout=0
+return
+end
+
+:emmcbootfail
+closesbox
+beep 0
+messagebox "emmc启动失败。" "check spi boot"
+sendln $3
+goto endtest
+end
+
+
+;=============================================================================
+
+
+:settestmac
+flushrecv
+sendln ' '
+wait '=>'
+sendln 'setenv ethaddr 00:11:22:33:44:01'
+wait '=>'
+sendln 'setenv eth1addr 00:11:22:33:44:02'
+wait '=>'
+sendln 'setenv eth2addr 00:11:22:33:44:03'
+wait '=>'
+sendln 'saveenv'
+wait '=>'
+sendln ' '
+wait '=>'
+return 
+
+;=============================================================================
+:checknet 
+flushrecv
+timeout=20
+sendln ' '
+wait '=>'
+call settestmac
+statusbox "测试网络连接中....     "   "status"
+sendln 'setenv ethact FM1@DTSEC4'
+wait '=>'
+sendln 'setenv serverip ' hostip
+wait '=>'
+sendln 'setenv ipaddr ' boardip
+wait '=>'
+sendln 'tftp 0x1000000 t1023rdb.dtb'
+wait '=>' 'Not retrying'
+if result=0 goto outtime
+if result=2 goto filenotfound
+closesbox
+sendln ' '
+wait '=>'
+timeout=0
+return
+
+
+:checknet2 
+flushrecv
+timeout=20
+sendln ' '
+wait '=>'
+call settestmac
+statusbox "测试网络连接中....     "   "status"
+sendln 'setenv ethact FM1@DTSEC1'
+wait '=>'
+sendln 'setenv serverip ' hostip
+wait '=>'
+sendln 'setenv ipaddr ' boardip
+wait '=>'
+sendln 'tftp 0x1000000 t1023rdb.dtb'
+wait '=>' 'Not retrying'
+if result=0 goto outtime2
+if result=2 goto filenotfound
+closesbox
+sendln ' '
+wait '=>'
+timeout=0
+return
+
+
+;===================================================================================
+
+:writenandboot
+flushrecv
+sendln ' '
+wait '=>'
+call checknet2
+timeout=50
+statusbox "烧写nand uboot中....     "   "status"
+sendln 'tftp 1000000 u-boot-t1023rdb-nandboot.bin'
+wait 'done'
+wait '=>'
+sendln 'nand info'
+wait 'Erase size   131072 b'
+sendln ' '
+wait '=>'
+sendln 'nand erase.chip'
+wait 'OK'
+sendln ' '
+wait '=>'
+sendln 'nand write 1000000 0 $filesize'
+wait 'written: OK'
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 fsl_fman_ucode_t1024_r1.0_108_4_2.bin'
+wait 'done'
+if result=0 goto outtime
+sendln ' '
+wait '=>'
+sendln 'nand write 1000000 160000 $filesize'
+wait 'written: OK'
+if result=0 goto outtime
+sendln 'tftp 1000000 t1023rdb.dtb'
+wait 'done'
+sendln ' '
+wait '=>'
+sendln 'nand  write 1000000 300000 $filesize'
+wait 'written: OK'
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 uImage.t1023'
+wait 'done'
+if result=0 goto outtime
+sendln ' '
+wait '=>'
+sendln 'nand write 1000000 400000 500000'
+wait 'written: OK'
+timeout=100
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 rootfs.ext2.gz.uboot.t1023rdb'
+wait 'done'
+if result=0 goto outtime
+sendln ' '
+wait '=>'
+sendln 'nand write 1000000 a00000 1e00000'
+wait 'written: OK'
+sendln ' '
+;setenv bootcmd ' nand read 1000000 400000 500000; nand read 5000000 300000 10000; nand read 2000000 a00000 1e00000;bootm 1000000 2000000 5000000'
+wait '=>'
+closesbox
+timeout=0
+return
+
+:checknandboot
+flushrecv
+timeout=60
+messagebox '断电设置SW2:OFF ON ON ON|ON,ON,OFF,ON; SW3.1 ON;SW4.4 OFF. U14旁边的跳线调换方向,60秒内重新上电' 'set'
+wait 'boot from NAND'
+if result=0 goto nandbootfail
+pause 3
+sendln ' '
+wait '=>'
+sendln "setenv bootcmd ' nand read 1000000 400000 500000; nand read 5000000 300000 10000; nand read 2000000 a00000 1e00000;bootm 1000000 2000000 5000000'"
+wait '=>'
+sendln 'saveenv'
+wait '=>'
+timeout=0
+return
+end
+
+:nandbootfail
+closesbox
+beep 0
+messagebox "nand启动失败。" "check spi boot"
+sendln $3
+goto endtest
+end
+
+;====================================================================================
+
+:writelinux
+flushrecv
+sendln ' '
+wait '=>'
+call checknet2
+statusbox "烧写LINUX中....     "   "status"
+sendln ' '
+wait '=>'
+timeout=50
+sendln 'tftp 1000000 t1023rdb.dtb'
+wait 'done'
+sendln ' '
+wait '=>'
+sendln 'sf probe'
+wait 'SF: Detected S25FL512S_256K'
+sendln ' '
+wait '=>'
+sendln 'sf write 1000000 300000 $filesize'
+wait 'Written: OK'
+sendln 'tftp 1000000 uImage.t1023'
+wait 'done'
+if result=0 goto outtime
+sendln 'sf write 1000000 400000 500000'
+wait 'Written: OK'
+timeout=100
+sendln ' '
+wait '=>'
+sendln 'tftp 1000000 rootfs.ext2.gz.uboot.t1023rdb'
+wait 'done'
+if result=0 goto outtime
+sendln ' '
+wait '=>'
+sendln 'sf write 1000000 a00000 1e00000'
+wait 'Written: OK'
+sendln ' '
+wait '=>'
+return
+end
+
+
+:writefirmware
+flushrecv
+sendln ' '
+wait '=>'
+call checknet2
+timeout=100
+statusbox "烧写firmware中....     "   "status"
+sendln 'tftp 1000000 AQ28nm-FW_2.0.B3_Freescale_T1024RDB_120514.cld'
+wait '=>'
+sendln 'mii dev FM_TGEC_MDIO'
+wait '=>'
+sendln 'mdio flash FM1@DTSEC3 0x1000000 $filesize'
+wait 'Device burned and verified'
+closesbox
+sendln ' '
+wait '=>'
+timeout=0
+return
+end
+
+
+
+
+
+:savemactoflash
+flushrecv
+cmd='setenv ethaddr '
+strconcat cmd macstr1
+sendln cmd
+wait '=>'
+cmd='setenv eth1addr '
+strconcat cmd macstr2
+sendln cmd
+wait '=>'
+cmd='setenv eth2addr '
+strconcat cmd macstr3
+sendln cmd
+wait '=>'
+return 
+
+:setrealmac
+flushrecv
+sendln ' '
+wait '=>'
+messagebox '准备设置mac地址' 'set'
+call do_getmac
+call savemactoflash
+sendln 'printenv ethaddr eth1addr eth2addr'
+wait '=>'
+yesnobox '检查输入的mac地址是否正确?' 'mac'
+if result=0 goto setrealmac
+sendln 'saveenv'
+wait '=>'
+
+getdate datestr
+gettime timestr
+strcopy datestr 3 2 date_year		
+strcopy datestr 6 2 date_month		
+strcopy datestr 9 2 date_day		
+strcopy timestr 1 2 time_hour		
+strcopy timestr 4 2 time_min		
+strcopy timestr 7 2 time_sec	
+
+inputbox "请输入板子编号:" "board_number"
+board_num=inputstr
+
+sendln 'mac id'
+wait '=>'
+sendln 'mac date ' date_year date_month date_day time_hour time_min time_sec
+wait '=>'
+sendln 'mac num ' board_num
+wait '=>'
+sendln 'mac ports 3'  
+wait '=>'
+sendln 'mac 0 ' macstr1  
+wait '=>'
+sendln 'mac 1 ' macstr2
+wait '=>'
+sendln 'mac 2 ' macstr3 
+wait '=>'
+sendln 'mac save'
+wait '=>'
+sendln 'mac'
+wait '=>'
+return
+
+
+:do_getmac
+:macbegin
+timeout=0
+inputbox "请输入mac，格式: 00:04:9F:12:34:56" "MAC 1 Entry"
+tolower macstr inputstr
+macstr1=macstr
+strlen macstr
+if result!=17 goto macretry
+;########## we have 00:11:22:33:44:55, parse it accordingly
+strsplit macstr ':' 6
+if result!=6 goto macretry
+;check if the mac is freescale mac
+strcompare '00' groupmatchstr1 
+if result!=0 goto macretry
+strcompare '04' groupmatchstr2
+if result!=0 goto macretry
+strcompare '9f' groupmatchstr3
+if result!=0 goto macretry
+tempstr1='0x'
+strconcat tempstr1 groupmatchstr6
+temp=0
+str2int temp tempstr1
+temp=temp+1
+if temp<256 then                        ;if the last data add 1 is not big FF
+      sprintf2  groupmatchstr6 "%02x" temp
+      macstrtemp=""
+      strjoin macstrtemp ":" 6
+      macstr2=macstrtemp
+      temp=temp+1
+      if temp<256 then                 ;if the last data add 2 is not big FF
+		sprintf2  groupmatchstr6 "%02x" temp
+		macstrtemp=""
+		strjoin macstrtemp ":" 6
+		macstr3=macstrtemp
+      else                            
+		groupmatchstr6='00'
+		tempstr2='0x'
+		strconcat tempstr2 groupmatchstr5
+		temp=0
+                str2int temp tempstr2
+		temp=temp+1
+		if temp<256 then    
+			sprintf2  groupmatchstr5 "%02x" temp
+			macstrtemp=""
+			strjoin macstrtemp ":" 6
+			macstr3=macstrtemp
+		else
+			groupmatchstr5='00'
+			tempstr3='0x'
+			strconcat tempstr3 groupmatchstr4
+			temp=0
+			str2int temp tempstr3
+			temp=temp+1
+			if temp<256 then 
+				sprintf2  groupmatchstr4 "%02x" temp
+				macstrtemp=""
+				strjoin macstrtemp ":" 6
+				macstr3=macstrtemp
+			else
+				goto macretry
+			endif
+		endif
+      endif
+else 
+	groupmatchstr6='00'
+        tempstr2='0x'
+	strconcat tempstr2 groupmatchstr5
+	temp=0
+        str2int temp tempstr2
+	temp=temp+1
+	if temp<256 then 
+		sprintf2  groupmatchstr5 "%02x" temp
+		macstrtemp=""
+		strjoin macstrtemp ":" 6
+		macstr2=macstrtemp
+	else
+		groupmatchstr5='00'
+		tempstr3='0x'
+		strconcat tempstr3 groupmatchstr4
+		temp=0
+		str2int temp tempstr3
+		temp=temp+1
+		if temp<256 then 
+			sprintf2 groupmatchstr4 "%02x" temp
+			macstrtemp=""
+			strjoin macstrtemp ":" 6
+			macstr2=macstrtemp
+		else  
+			goto macretry
+		endif
+	endif    
+	temp=1
+	sprintf2  groupmatchstr6 "%02x" temp
+	macstrtemp=""
+	strjoin macstrtemp ":" 6
+	macstr3=macstrtemp
+endif
+return
+
+:macretry
+yesnobox "MAC的格式错误或者不是freescale的地址范围，要重新输入吗?" "Yes No"
+if result goto macbegin
+end
+
+
+;=============================================================================
+:outtime
+closesbox
+beep 0
+messagebox "连接超时,请检查J4连接的网络和tftp服务器设置。" "check net connect"
+sendln $3
+goto endtest
+end
+;=============================================================================
+:outtime2
+closesbox
+beep 0
+messagebox "连接超时，请检查J5连接的网络和tftp服务器设置。" "check net connect"
+sendln $3
+goto endtest
+end
+
+;=============================================================================
+:filenotfound
+closesbox
+beep 0
+messagebox "文件不存在，请检查tftp服务器" "check tftp "
+goto endtest
+end
+
+;=============================================================================
+:endtest
+dispstr  'Exittest'
+sendln ' '
+end
+;=============================================================================
